@@ -1,0 +1,293 @@
+CREATE TABLE Users (
+    UserID INT PRIMARY KEY,
+    FullName VARCHAR(100),
+    Email VARCHAR(100),
+    ContactNumber VARCHAR(15)
+);
+
+
+--location
+
+CREATE TABLE Locations (
+    LocationID INT PRIMARY KEY,
+    City VARCHAR(50),
+    Country VARCHAR(50)
+);
+
+--Transactions
+CREATE TABLE Transactions (
+    TransactionID INT PRIMARY KEY,
+    UserID INT,
+    Amount NUMBER(10,2),
+    TransactionTime DATE,
+    LocationID INT,
+    FOREIGN KEY (UserID) REFERENCES Users(UserID),
+    FOREIGN KEY (LocationID) REFERENCES Locations(LocationID)
+);
+
+
+CREATE TABLE FraudReports (
+    ReportID INT PRIMARY KEY,
+    TransactionID INT,
+    Reason VARCHAR(255),
+    ReportedTime DATE,
+    FOREIGN KEY (TransactionID) REFERENCES Transactions(TransactionID)
+);
+
+
+INSERT INTO Users VALUES (1, 'Priyanshi Maurya', 'priya@gmail.com', '9876543210');
+INSERT INTO Locations VALUES (1, 'Mumbai', 'India');
+INSERT INTO Transactions VALUES (1001, 1, 12000.00, TO_DATE('2025-06-18 10:00:00', 'YYYY-MM-DD HH24:MI:SS'), 1);
+INSERT INTO Transactions VALUES (1002, 1, 500.00, TO_DATE('2025-06-18 10:01:00', 'YYYY-MM-DD HH24:MI:SS'), 1);
+
+SELECT * FROM Transactions
+WHERE Amount > 10000;
+
+SELECT 
+    TransactionID, UserID, Amount, TransactionTime,
+    COUNT(*) OVER (PARTITION BY UserID ORDER BY TransactionTime 
+                   RANGE BETWEEN INTERVAL '10' MINUTE PRECEDING AND CURRENT ROW) AS RapidTxCount
+FROM Transactions;
+
+
+WITH RecentTx AS (
+    SELECT 
+        t1.UserID,
+        t1.TransactionID AS Tx1_ID,
+        t2.TransactionID AS Tx2_ID,
+        t1.LocationID AS Loc1,
+        t2.LocationID AS Loc2,
+        t1.TransactionTime AS Time1,
+        t2.TransactionTime AS Time2
+    FROM Transactions t1
+    JOIN Transactions t2 ON t1.UserID = t2.UserID AND t1.TransactionID < t2.TransactionID
+    WHERE t1.LocationID <> t2.LocationID
+    AND ABS(t1.TransactionTime - t2.TransactionTime) * 1440 <= 10  -- difference in minutes
+)
+SELECT * FROM RecentTx;
+
+
+
+CREATE OR REPLACE TRIGGER trg_insert_fraud
+AFTER INSERT ON Transactions
+FOR EACH ROW
+BEGIN
+    IF :NEW.Amount > 10000 THEN
+        INSERT INTO FraudReports (TransactionID, Reason, ReportedTime)
+        VALUES (:NEW.TransactionID, 'Auto-detected: Amount > 10,000', SYSDATE);
+    END IF;
+END;
+/
+
+SELECT 
+    fr.ReportID,
+    u.FullName,
+    t.Amount,
+    fr.Reason,
+    fr.ReportedTime
+FROM FraudReports fr
+JOIN Transactions t ON fr.TransactionID = t.TransactionID
+JOIN Users u ON t.UserID = u.UserID;
+
+
+
+-- Customers Table
+CREATE TABLE Customers (
+    CustomerID INT PRIMARY KEY,
+    CustomerName VARCHAR(50),
+    City VARCHAR(50)
+);
+
+-- Orders Table
+CREATE TABLE Orders (
+    OrderID INT PRIMARY KEY,
+    CustomerID INT,
+    Product VARCHAR(50),
+    OrderDate DATE,
+    FOREIGN KEY (CustomerID) REFERENCES Customers(CustomerID)
+);
+
+
+-- Customers
+INSERT INTO Customers VALUES
+(1, 'Alice', 'Delhi'),
+(2, 'Bob', 'Mumbai'),
+(3, 'Charlie', 'Bangalore'),
+(4, 'David', 'Hyderabad');
+
+-- Orders
+INSERT INTO Orders VALUES
+(101, 1, 'Laptop', '2024-01-10'),
+(102, 2, 'Mouse', '2024-01-12'),
+(103, 1, 'Keyboard', '2024-02-01'),
+(104, 5, 'Monitor', '2024-02-15'); -- CustomerID 5 doesn't exist
+
+
+SELECT Customers.CustomerName, Orders.Product
+FROM Customers
+INNER JOIN Orders ON Customers.CustomerID = Orders.CustomerID;
+
+
+SELECT Customers.CustomerName, Orders.Product
+FROM Customers
+LEFT JOIN Orders ON Customers.CustomerID = Orders.CustomerID;
+
+SELECT Customers.CustomerName, Orders.Product
+FROM Customers
+RIGHT JOIN Orders ON Customers.CustomerID = Orders.CustomerID;
+
+
+SELECT Customers.CustomerName, Orders.Product
+FROM Customers
+LEFT JOIN Orders ON Customers.CustomerID = Orders.CustomerID
+
+UNION
+
+SELECT Customers.CustomerName, Orders.Product
+FROM Customers
+RIGHT JOIN Orders ON Customers.CustomerID = Orders.CustomerID;
+
+
+
+-- Departments Table
+CREATE TABLE Departments (
+    DeptID INT PRIMARY KEY,
+    DeptName VARCHAR(50)
+);
+
+-- Employees Table
+CREATE TABLE Employees (
+    EmpID INT PRIMARY KEY,
+    EmpName VARCHAR(50),
+    Salary INT,
+    DeptID INT,
+    FOREIGN KEY (DeptID) REFERENCES Departments(DeptID)
+);
+
+
+-- Departments
+INSERT INTO Departments VALUES
+(1, 'HR'),
+(2, 'Finance'),
+(3, 'IT');
+
+-- Employees
+INSERT INTO Employees VALUES
+(101, 'Alice', 50000, 1),
+(102, 'Bob', 60000, 2),
+(103, 'Charlie', 45000, 3),
+(104, 'David', 70000, 2),
+(105, 'Eve', 30000, NULL);  -- No department
+
+
+-- Find each employee’s salary compared to the average salary
+SELECT EmpName,
+       Salary,
+       (SELECT AVG(Salary) FROM Employees) AS AvgSalary
+FROM Employees;
+
+
+-- Employees who belong to departments having 'Finance' or 'IT'
+SELECT EmpName
+FROM Employees
+WHERE DeptID IN (
+    SELECT DeptID FROM Departments WHERE DeptName IN ('Finance', 'IT')
+);
+
+
+-- Employees who belong to a department that exists
+SELECT EmpName
+FROM Employees E
+WHERE EXISTS (
+    SELECT 1 FROM Departments D WHERE D.DeptID = E.DeptID
+);
+
+
+-- Employees who earn more than the average salary of their department
+SELECT EmpName, Salary
+FROM Employees E
+WHERE Salary > (
+    SELECT AVG(Salary)
+    FROM Employees
+    WHERE DeptID = E.DeptID
+);
+
+
+-- Average salary by department (using derived table)
+SELECT DeptName, AvgSalary
+FROM (
+    SELECT D.DeptName, AVG(E.Salary) AS AvgSalary
+    FROM Departments D
+    JOIN Employees E ON D.DeptID = E.DeptID
+    GROUP BY D.DeptName
+) AS DeptSalaries;
+
+
+
+--Stored Procedure
+
+CREATE OR REPLACE PROCEDURE give_bonus (
+    p_emp_id IN NUMBER,
+    p_bonus OUT NUMBER
+) AS
+    v_salary NUMBER;
+BEGIN
+    -- Get the current salary
+    SELECT salary INTO v_salary
+    FROM employees
+    WHERE employee_id = p_emp_id;
+
+    -- Calculate bonus
+    p_bonus := v_salary * 0.10;
+
+    -- Update salary with bonus
+    UPDATE employees
+    SET salary = salary + p_bonus
+    WHERE employee_id = p_emp_id;
+
+    DBMS_OUTPUT.PUT_LINE('Bonus of ' || p_bonus || ' given to Employee ID ' || p_emp_id);
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        DBMS_OUTPUT.PUT_LINE('No employee found with ID ' || p_emp_id);
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Error: ' || SQLERRM);
+END;
+/
+
+
+--To call the procedure:
+
+DECLARE
+    v_bonus NUMBER;
+BEGIN
+    give_bonus(101, v_bonus);
+    DBMS_OUTPUT.PUT_LINE('Calculated Bonus: ' || v_bonus);
+END;
+/
+
+
+--Function in sql
+CREATE OR REPLACE FUNCTION yearly_salary (
+    p_emp_id IN NUMBER
+) RETURN NUMBER
+AS
+    v_salary NUMBER;
+BEGIN
+    SELECT salary INTO v_salary
+    FROM employees
+    WHERE employee_id = p_emp_id;
+
+    RETURN v_salary * 12;
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        RETURN 0;
+END;
+/
+
+
+--To use the function:
+SELECT yearly_salary(101) AS annual_salary FROM dual;
+
+
+
+
